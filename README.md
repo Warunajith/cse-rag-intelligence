@@ -11,9 +11,9 @@ reports — every figure traceable to its source page.
 [Ask interface](docs/screenshots/ask.png)
 
 
-[Catalog interface](docs/screenshots/ask.png)
+[Catalog interface](docs/screenshots/catalog.png)
 
-[Companies interface](docs/screenshots/ask.png)
+[Companies interface](docs/screenshots/companies.png)
 
 ## What it does
 
