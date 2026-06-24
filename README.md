@@ -5,15 +5,18 @@ reports from the **Colombo Stock Exchange (CSE)**. Ask financial questions in
 plain language across listed companies and get answers grounded in the actual
 reports — every figure traceable to its source page.
 
+
 ![Architecture](docs/architecture.svg)
 
 
-[Ask interface](docs/screenshots/ask.png)
+## User Interfaces
+
+![Ask interface](docs/screenshots/ask.png)
 
 
-[Catalog interface](docs/screenshots/catalog.png)
+![Catalog interface](docs/screenshots/catalog.png)
 
-[Companies interface](docs/screenshots/companies.png)
+![Companies interface](docs/screenshots/companies.png)
 
 ## What it does
 
