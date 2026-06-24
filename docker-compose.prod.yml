@@ -1,0 +1,233 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PRODUCTION-ORIENTED compose. Differs from the dev docker-compose.yml in:
+#   • Backing services (Postgres, Redis, MinIO, OpenSearch) are NOT published to
+#     the host — they talk only over the internal network. Only the frontend
+#     (and optionally a reverse proxy) is exposed.
+#   • Secrets are REQUIRED from the environment — no insecure defaults.
+#   • OpenSearch security plugin enabled (set credentials via env).
+#   • Resource limits + restart policies on every service.
+#   • Redis persistence (AOF) + memory cap.
+#
+# Usage:
+#   cp .env.prod.example .env          # fill EVERY value — no blanks
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Put a reverse proxy (nginx/Caddy/Traefik) in front of the frontend for TLS
+# and, if you expose the API, API-key auth. This file intentionally does NOT
+# publish the API port by default.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  frontend:
+    build: ./frontend
+    container_name: cse-frontend
+    environment:
+      - BACKEND_URL=http://rag-api:8000
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"                    # the ONLY public app port
+    depends_on:
+      rag-api:
+        condition: service_started
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 512M }
+    networks: [ragnet]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=${PG_DB:?set PG_DB}
+      - POSTGRES_USER=${PG_USER:?set PG_USER}
+      - POSTGRES_PASSWORD=${PG_PASSWORD:?set a strong PG_PASSWORD}
+    # NO host port — internal network only
+    expose: ["5432"]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 1G }
+    networks: [ragnet]
+
+  minio:
+    image: minio/minio:RELEASE.2024-09-22T00-33-43Z   # pinned, not :latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:?set a strong MINIO_SECRET_KEY}
+    expose: ["9000", "9001"]           # internal only; tunnel for console access
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 1G }
+    networks: [ragnet]
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    # AOF persistence so queued jobs survive restarts; memory cap with safe evict
+    command: >
+      redis-server --appendonly yes
+      --maxmemory 256mb --maxmemory-policy noeviction
+      --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    expose: ["6379"]
+    volumes:
+      - redis-data:/data
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 320M }
+    networks: [ragnet]
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g"
+      # security plugin ENABLED (default). Set the admin password:
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OS_ADMIN_PASSWORD:?set a strong OS_ADMIN_PASSWORD}
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    expose: ["9200"]                   # internal only
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      # uses TLS + auth now that security is on
+      test: ["CMD-SHELL", "curl -sk -u admin:${OS_ADMIN_PASSWORD} https://localhost:9200/_cluster/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 3G }
+    networks: [ragnet]
+
+  # Dashboards NOT included in prod by default — it's an admin tool. Access
+  # OpenSearch via SSH tunnel + a temporary dashboards container when needed.
+
+  rag-api:
+    build: ./backend
+    container_name: rag-api
+    environment:
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PORT=9200
+      - OPENSEARCH_USE_SSL=true                 # security plugin is on
+      - OPENSEARCH_USER=admin
+      - OPENSEARCH_PASSWORD=${OS_ADMIN_PASSWORD}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?set OPENAI_API_KEY}
+      - GEN_MODEL=${GEN_MODEL:-gpt-4o-mini}
+      - RERANK_ENABLED=${RERANK_ENABLED:-false}
+      - RERANKER_URL=http://reranker:8001
+      - RERANK_TIMEOUT=${RERANK_TIMEOUT:-15}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DB=${PG_DB}
+      - PG_USER=${PG_USER}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - API_KEY=${API_KEY:?set an API_KEY to protect /ask and /index}
+    # By default DO NOT publish the API. Front it with a reverse proxy that adds
+    # TLS + checks the API key. Uncomment to expose directly (not recommended):
+    # ports: ["8000:8000"]
+    expose: ["8000"]
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 1G }
+    networks: [ragnet]
+
+  worker:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile.worker
+    container_name: cse-worker
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - EMBED_MODEL=${EMBED_MODEL:-text-embedding-3-large}
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PORT=9200
+      - OPENSEARCH_USE_SSL=true
+      - OPENSEARCH_USER=admin
+      - OPENSEARCH_PASSWORD=${OS_ADMIN_PASSWORD}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DB=${PG_DB}
+      - PG_USER=${PG_USER}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      opensearch:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 6G }         # Docling + torch parse headroom
+    networks: [ragnet]
+
+  reranker:
+    build:
+      context: ./reranker
+      args:
+        WITH_LOCAL: ${RERANKER_WITH_LOCAL:-false}
+    container_name: reranker
+    profiles: ["rerank"]
+    environment:
+      - RERANKER_BACKEND=${RERANKER_BACKEND:-jina}
+      - COHERE_API_KEY=${COHERE_API_KEY:-}
+      - JINA_API_KEY=${JINA_API_KEY:-}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY:-}
+    expose: ["8001"]
+    restart: always
+    deploy:
+      resources:
+        limits: { memory: 2G }
+    volumes:
+      - hf-cache:/home/appuser/.cache/huggingface
+    networks: [ragnet]
+
+volumes:
+  opensearch-data:
+  hf-cache:
+  pg-data:
+  minio-data:
+  redis-data:
+
+networks:
+  ragnet:
+    driver: bridge

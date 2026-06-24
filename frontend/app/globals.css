@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300..600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --ink: #10302b;
+  --paper: #f6f4ee;
+  --paper-card: #fffdf8;
+  --teal: #0f6e63;
+  --teal-d: #0a443d;
+  --gold: #b08a3e;
+  --rule: #d8d2c4;
+  --flag: #b4502f;
+
+  --serif: 'Instrument Serif', serif;
+  --sans: 'DM Sans', sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; }
+
+button { font-family: inherit; cursor: pointer; }
+
+/* utility classes used across pages */
+.mono { font-family: var(--mono); }
+.serif { font-family: var(--serif); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .8px;
+  color: color-mix(in srgb, var(--ink) 60%, transparent);
+}
+
+.rule-t { border-top: 1px solid var(--rule); }
+.rule-b { border-bottom: 1px solid var(--rule); }
+
+input::placeholder { color: color-mix(in srgb, var(--ink) 45%, transparent); }
+input:focus, textarea:focus { outline: none; border-color: var(--teal); }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 32px; }
+
+::selection { background: color-mix(in srgb, var(--gold) 30%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; animation: none !important; }
+}
+
+/* status badge */
+.badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .5px;
+  padding: 2px 7px;
+  border: 1px solid var(--rule);
+  display: inline-block;
+}
+.badge-indexed { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 40%, transparent); }
+.badge-flagged, .badge-failed { color: var(--flag); border-color: color-mix(in srgb, var(--flag) 40%, transparent); }
+.badge-pending, .badge-no_report { color: color-mix(in srgb, var(--ink) 55%, transparent); }

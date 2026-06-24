@@ -1,0 +1,129 @@
+{
+  "_README": "Eval set for the annual-report RAG. Fill `expected_answer` and `expected_sources` by VERIFYING against the actual PDFs. `expected_sources` lists doc_id + page(s) where the answer truly lives (used for retrieval recall). For unanswerable questions set `should_refuse: true` and leave expected_sources empty. `category` groups results in the report. Replace the example company/ticker/year values with YOUR indexed data.",
+
+  "config": {
+    "api_base": "http://localhost:8000",
+    "retrieval_k": 6,
+    "notes": "Set company/ticker filters per-question only when testing scoped retrieval."
+  },
+
+  "questions": [
+    {
+      "id": "fact-001",
+      "category": "point_lookup",
+      "question": "What was the Group profit after tax for the year?",
+      "filters": {"company": "Overseas Realty (Ceylon) PLC"},
+      "expected_answer": "FILL: e.g. Rs. X Mn for FY2025",
+      "expected_sources": [{"doc_id": "osea", "pages": [124]}],
+      "should_refuse": false
+    },
+    {
+      "id": "fact-002",
+      "category": "point_lookup",
+      "question": "What was the Group revenue for the year?",
+      "filters": {},
+      "expected_answer": "FILL",
+      "expected_sources": [{"doc_id": "osea", "pages": [124]}],
+      "should_refuse": false
+    },
+    {
+      "id": "table-001",
+      "category": "table_computation",
+      "question": "What was the year-over-year revenue growth percentage?",
+      "filters": {},
+      "expected_answer": "FILL: state the computed % and the two figures it derives from",
+      "expected_sources": [{"doc_id": "osea", "pages": [124]}],
+      "should_refuse": false
+    },
+    {
+      "id": "trend-001",
+      "category": "temporal_trend",
+      "question": "How has profit before tax moved over the last five years?",
+      "filters": {},
+      "expected_answer": "FILL: from the ten-year/five-year summary",
+      "expected_sources": [{"doc_id": "osea", "pages": [173]}],
+      "should_refuse": false
+    },
+    {
+      "id": "narr-001",
+      "category": "narrative",
+      "question": "What are the company's main strategic priorities for the coming year?",
+      "filters": {},
+      "expected_answer": "FILL: from Chairperson's/MD&A section",
+      "expected_sources": [{"doc_id": "osea", "pages": [9]}],
+      "should_refuse": false
+    },
+    {
+      "id": "multihop-001",
+      "category": "multi_hop",
+      "question": "Does the Chairperson's outlook align with the reported profit trend?",
+      "filters": {},
+      "expected_answer": "FILL: requires narrative + financial table",
+      "expected_sources": [{"doc_id": "osea", "pages": [9, 124]}],
+      "should_refuse": false
+    },
+    {
+      "id": "bank-001",
+      "category": "point_lookup",
+      "question": "What was the bank's net interest income for the year?",
+      "filters": {"ticker": "FILL_BANK_TICKER"},
+      "expected_answer": "FILL",
+      "expected_sources": [{"doc_id": "FILL_BANK_DOCID", "pages": [0]}],
+      "should_refuse": false
+    },
+    {
+      "id": "bank-002",
+      "category": "ratio",
+      "question": "What is the bank's capital adequacy ratio?",
+      "filters": {"ticker": "FILL_BANK_TICKER"},
+      "expected_answer": "FILL",
+      "expected_sources": [{"doc_id": "FILL_BANK_DOCID", "pages": [0]}],
+      "should_refuse": false
+    },
+    {
+      "id": "ambig-001",
+      "category": "ambiguity",
+      "question": "What was the profit?",
+      "filters": {"company": "Overseas Realty (Ceylon) PLC"},
+      "expected_answer": "FILL: a GOOD answer distinguishes Group vs Company and states the year",
+      "expected_sources": [{"doc_id": "osea", "pages": [124]}],
+      "should_refuse": false
+    },
+    {
+      "id": "refuse-001",
+      "category": "refusal_trap",
+      "question": "What was the CEO's total compensation in US dollars?",
+      "filters": {},
+      "expected_answer": "Should state this is not disclosed (or not in USD) in the report.",
+      "expected_sources": [],
+      "should_refuse": true
+    },
+    {
+      "id": "refuse-002",
+      "category": "refusal_trap",
+      "question": "What were the company's Q3 quarterly earnings?",
+      "filters": {},
+      "expected_answer": "Should state annual reports do not contain quarterly breakdowns.",
+      "expected_sources": [],
+      "should_refuse": true
+    },
+    {
+      "id": "refuse-003",
+      "category": "refusal_trap",
+      "question": "What is the company's exact market share in its sector?",
+      "filters": {},
+      "expected_answer": "Should state this is not disclosed in the report.",
+      "expected_sources": [],
+      "should_refuse": true
+    },
+    {
+      "id": "crosssec-001",
+      "category": "cross_sector_premise",
+      "question": "What is Overseas Realty's net interest margin?",
+      "filters": {"company": "Overseas Realty (Ceylon) PLC"},
+      "expected_answer": "Should explain NIM is a banking metric, not applicable to a real estate company.",
+      "expected_sources": [],
+      "should_refuse": true
+    }
+  ]
+}

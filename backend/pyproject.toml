@@ -1,0 +1,16 @@
+[project]
+name = "annual-report-rag"
+version = "1.0.0"
+description = "Hybrid-search RAG serving layer for annual report analysis"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<0.116",
+    "uvicorn[standard]>=0.34,<0.35",
+    "opensearch-py>=2,<3",
+    "openai>=1,<2",
+    "pydantic>=2,<3",
+]
+
+# Ingestion deps are intentionally NOT here — the serving container stays lean.
+# Install those separately in your ingestion environment:
+#   uv pip install docling tiktoken python-dotenv pandas

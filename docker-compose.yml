@@ -1,0 +1,191 @@
+# Full stack: OpenSearch + Dashboards + RAG API + Frontend + Worker
+#            + (optional) Reranker service.
+#
+# Run baseline:                 docker compose up -d --build
+# Run with reranking:           docker compose --profile rerank up -d --build
+#
+# The worker consumes index/discover jobs from Redis (enqueued by the API) and
+# runs the heavy Docling pipeline in isolation, so the API stays responsive.
+
+services:
+
+  frontend:
+    build: ./frontend
+    container_name: cse-frontend
+    environment:
+      - BACKEND_URL=http://rag-api:8000
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - rag-api
+    networks: [ragnet]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=${PG_DB:-cse_rag}
+      - POSTGRES_USER=${PG_USER:-raguser}
+      - POSTGRES_PASSWORD=${PG_PASSWORD:-ragpass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-raguser} -d ${PG_DB:-cse_rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [ragnet]
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [ragnet]
+
+  # NEW — job broker for on-demand indexing / discovery
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks: [ragnet]
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [ragnet]
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    container_name: opensearch-dashboards
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks: [ragnet]
+
+  rag-api:
+    build: ./backend
+    container_name: rag-api
+    environment:
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PORT=9200
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEN_MODEL=${GEN_MODEL:-gpt-4o-mini}
+      - RERANK_ENABLED=${RERANK_ENABLED:-false}
+      - RERANKER_URL=http://reranker:8001
+      - RERANK_TIMEOUT=${RERANK_TIMEOUT:-15}
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DB=${PG_DB:-cse_rag}
+      - PG_USER=${PG_USER:-raguser}
+      - PG_PASSWORD=${PG_PASSWORD:-ragpass}
+      - REDIS_URL=redis://redis:6379/0          # NEW — API enqueues jobs here
+    ports:
+      - "8000:8000"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks: [ragnet]
+
+  # NEW — ingestion worker: consumes jobs, runs download->parse->chunk->index.
+  # Heavy image (Docling + CPU-torch). Build context is the ingestion folder.
+  worker:
+    build:
+      context: ./ingestion          # <-- adjust to your ingestion folder name
+      dockerfile: Dockerfile.worker
+    container_name: cse-worker
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - EMBED_MODEL=${EMBED_MODEL:-text-embedding-3-large}
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PORT=9200
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DB=${PG_DB:-cse_rag}
+      - PG_USER=${PG_USER:-raguser}
+      - PG_PASSWORD=${PG_PASSWORD:-ragpass}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [ragnet]
+
+  reranker:
+    build:
+      context: ./reranker
+      args:
+        WITH_LOCAL: ${RERANKER_WITH_LOCAL:-true}
+    container_name: reranker
+    profiles: ["rerank"]
+    environment:
+      - RERANKER_BACKEND=${RERANKER_BACKEND:-local}
+      - COHERE_API_KEY=${COHERE_API_KEY:-}
+      - JINA_API_KEY=${JINA_API_KEY:-}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY:-}
+    ports:
+      - "8001:8001"
+    volumes:
+      - hf-cache:/home/appuser/.cache/huggingface
+    networks: [ragnet]
+
+volumes:
+  opensearch-data:
+  hf-cache:
+  pg-data:
+  minio-data:
+
+networks:
+  ragnet:
+    driver: bridge

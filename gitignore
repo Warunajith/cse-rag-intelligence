@@ -1,0 +1,47 @@
+# ─── Secrets (NEVER commit) ───
+.env
+.env.local
+.env.*.local
+*.key
+**/secrets/
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ─── Node / Next.js ───
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Data / artifacts (don't bloat the repo) ───
+parsed_output/
+eval_results/
+*.pdf
+*.db
+ingestion_registry.db
+/data/
+*.csv
+!CompanyList.example.csv
+
+# ─── Docker / volumes ───
+pg-data/
+minio-data/
+opensearch-data/
+hf-cache/
+
+# ─── OS / editor ───
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

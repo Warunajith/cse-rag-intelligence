@@ -1,0 +1,39 @@
+# Ingestion worker — heavy image (Docling + CPU torch). Consumes Redis jobs and
+# runs the download->parse->chunk->index pipeline. Built from the ingestion folder.
+
+FROM python:3.12-slim
+
+# System libs Docling / OpenCV need at runtime.
+# libglib2.0-0, libgl1, libxcb1 cover the shared objects OpenCV loads even in
+# headless mode on slim images.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libgl1 libxcb1 libxext6 libsm6 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+WORKDIR /app
+
+# 1) CPU-only torch + torchvision together, from the same index, so their
+#    compiled operators match (fixes 'torchvision::nms does not exist') and no
+#    multi-GB NVIDIA/CUDA libs get pulled.
+RUN uv pip install --system --no-cache \
+      torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# 2) Docling + the rest of the pipeline deps.
+RUN uv pip install --system --no-cache \
+    docling openai tiktoken opensearch-py psycopg2-binary minio requests \
+    redis python-dotenv pandas tabulate
+
+# 3) Headless OpenCV — replaces the GUI opencv-python Docling pulls in, so no
+#    libGL/X11/xcb display libraries are required (fixes libxcb.so.1 ImportError).
+RUN uv pip install --system --no-cache opencv-python-headless
+
+# App code (all worker modules + schema). COPY *.py grabs worker.py, pipeline.py,
+# jobqueue.py, discover.py, cse_client.py, infra.py, load_companies.py, etc.
+COPY *.py ./
+COPY schema.sql ./
+
+# Unbuffered stdout so print()s stream straight to docker logs.
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "worker.py"]
