@@ -160,6 +160,8 @@ services:
       opensearch:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ./data:/app/data
     networks: [ragnet]
 
   reranker:

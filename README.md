@@ -49,6 +49,10 @@ cd cse-rag-intelligence
 
 cp .env.example .env          # fill in OPENAI_API_KEY (rotate any shared key!)
 
+cp ./frontend/.env.local.example ./frontend/.env.local      # BACKEND_URL=http://rag-api:8000
+
+cp ./data/CompanyList.example.csv ./data/CompanyList.csv    # Populate the CSV with your Own Data
+
 # bring up the core stack
 docker compose up -d --build
 
